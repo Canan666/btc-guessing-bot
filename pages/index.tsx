@@ -44,7 +44,7 @@ export default function BTCGuessingTool() {
   const [history, setHistory] = useState<Prediction[]>([]);
 
   useEffect(() => {
-    const ws = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@ticker");
+    const ws = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade");
     ws.onmessage = (evt) => {
       const msg = JSON.parse(evt.data);
       const last = parseFloat(msg.c);
