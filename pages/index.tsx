@@ -43,8 +43,11 @@ export default function BTCGuessingTool() {
   const [timeframe, setTimeframe] = useState("10分钟");
   const [history, setHistory] = useState<Prediction[]>([]);
 
+  // 用 WS 获取实时价格
   useEffect(() => {
-    const ws = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade");
+    const ws = new WebSocket(
+      "wss://stream.binance.com:9443/ws/btcusdt@ticker"
+    );
     ws.onmessage = (evt) => {
       const msg = JSON.parse(evt.data);
       const last = parseFloat(msg.c);
