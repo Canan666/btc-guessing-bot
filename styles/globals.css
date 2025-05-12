@@ -1,0 +1,9 @@
+/* TailwindCSS 基础样式 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 自定义样式（可选） */
+body {
+  font-family: 'Arial', sans-serif;
+}
