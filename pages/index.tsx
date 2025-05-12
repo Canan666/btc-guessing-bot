@@ -19,17 +19,23 @@ const timeframeToMs: Record<string, number> = {
   "1天": 24 * 60 * 60 * 1000,
 };
 
+const profitRates: Record<string, number> = {
+  "10分钟": 0.8,
+  "30分钟": 0.85,
+  "1小时": 0.85,
+  "1天": 0.85,
+};
+
 interface Prediction {
   time: string;
   price: number;
   timeframe: string;
   recommendation: string;
-  riskIndex: string;
-  analysisDetail: string;
   predictedPrice: number;
   endTime: number;
   actualPrice?: number;
   result?: "正确" | "错误" | "未知";
+  profit?: number;
 }
 
 export default function BTCGuessingTool() {
@@ -37,11 +43,8 @@ export default function BTCGuessingTool() {
   const [timeframe, setTimeframe] = useState("10分钟");
   const [history, setHistory] = useState<Prediction[]>([]);
 
-  // 用 WS 获取实时价格
   useEffect(() => {
-    const ws = new WebSocket(
-      "wss://stream.binance.com:9443/ws/btcusdt@ticker"
-    );
+    const ws = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@ticker");
     ws.onmessage = (evt) => {
       const msg = JSON.parse(evt.data);
       const last = parseFloat(msg.c);
@@ -50,179 +53,105 @@ export default function BTCGuessingTool() {
     return () => ws.close();
   }, []);
 
-  // 验证到期预测
   useEffect(() => {
-    const iv = setInterval(() => {
+    const interval = setInterval(() => {
       const now = Date.now();
       setHistory((prev) =>
         prev.map((h) => {
-          if (h.actualPrice == null && now >= h.endTime && price != null) {
-            let result: "正确" | "错误" | "未知" = "未知";
-            if (h.recommendation === "看涨") {
-              result = price > h.predictedPrice ? "正确" : "错误";
-            } else if (h.recommendation === "看跌") {
-              result = price < h.predictedPrice ? "正确" : "错误";
-            }
-            return { ...h, actualPrice: price, result };
+          if (!h.actualPrice && now >= h.endTime && price != null) {
+            const correct = 
+              (h.recommendation === "看涨" && price > h.predictedPrice) ||
+              (h.recommendation === "看跌" && price < h.predictedPrice);
+            const result = correct ? "正确" : "错误";
+            const profit = correct ? 5 * profitRates[h.timeframe] : -5;
+            return { ...h, actualPrice: price, result, profit };
           }
           return h;
         })
       );
     }, 1000);
-    return () => clearInterval(iv);
+    return () => clearInterval(interval);
   }, [price]);
 
-  // 点击分析 —— 串调用深度分析接口
-  const handleAnalyze = async () => {
-  console.log("🚀 handleAnalyze called, price =", price);
-  if (price == null) {
-    console.warn("⚠️ 当前 price 为空，无法分析");
-    return;
-  }
-
-  try {
-    console.log("🌐 Fetching /api/btc-depth …");
-    const res = await fetch("/api/btc-depth");
-    console.log("⬇️ /api/btc-depth status:", res.status);
-    const json = await res.json();
-    console.log("📊 /api/btc-depth response:", json);
-
-    if (!res.ok || (json as any).error) {
-      console.error("❌ 深度分析失败：", (json as any).error);
-      return;
-    }
-
-    const { recommendation, riskIndex, analysisDetail } = json as {
-      recommendation: string;
-      riskIndex: string;
-      analysisDetail: string;
-    };
-
+  const autoTrade = (recommendation: string) => {
     const now = Date.now();
     const duration = timeframeToMs[timeframe] ?? 0;
-    const newPred: Prediction = {
+    const newPrediction: Prediction = {
       time: new Date(now).toLocaleString(),
-      price,
+      price: price!,
       timeframe,
       recommendation,
-      riskIndex,
-      analysisDetail,
-      predictedPrice: price,
+      predictedPrice: price!,
       endTime: now + duration,
     };
-    console.log("✅ 推入历史记录：", newPred);
-    setHistory((prev) => [...prev, newPred]);
-  } catch (e) {
-    console.error("🔥 handleAnalyze exception:", e);
-  }
-};
+    setHistory((prev) => [...prev, newPrediction]);
+  };
 
+  const handleAnalyze = async () => {
+    if (!price) return;
+    try {
+      const res = await fetch("/api/btc-depth");
+      const json = await res.json();
+      if (!res.ok) return;
+      
+      const { recommendation } = json;
+      autoTrade(recommendation);  // 自动交易
+    } catch (e) {
+      console.error("分析失败:", e);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6 bg-gray-50 min-h-screen">
-      <Card className="shadow-xl border border-gray-200">
-        <CardContent className="space-y-4 p-6">
-          <h2 className="text-2xl font-bold text-gray-800">
-            BTC 模拟竞猜工具
-          </h2>
-          <div className="text-base text-gray-600">
-            当前价格：{" "}
-            <span className="text-green-600 font-semibold">
-              {price != null ? `$${price.toFixed(2)} USD` : "加载中..."}
-            </span>
-          </div>
+      <Card>
+        <CardContent>
+          <h2 className="text-2xl font-bold">BTC 模拟交易工具</h2>
+          <p>当前价格：{price ? `$${price.toFixed(2)}` : "加载中..."}</p>
+          
+          <label>预测周期：</label>
+          <RadioGroup value={timeframe} onValueChange={setTimeframe}>
+            <RadioGroupItem value="10分钟">10分钟</RadioGroupItem>
+            <RadioGroupItem value="30分钟">30分钟</RadioGroupItem>
+            <RadioGroupItem value="1小时">1小时</RadioGroupItem>
+            <RadioGroupItem value="1天">1天</RadioGroupItem>
+          </RadioGroup>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              选择预测周期：
-            </label>
-            <RadioGroup
-              value={timeframe}
-              onValueChange={setTimeframe}
-              className="flex gap-4"
-            >
-              <RadioGroupItem value="10分钟">10分钟</RadioGroupItem>
-              <RadioGroupItem value="30分钟">30分钟</RadioGroupItem>
-              <RadioGroupItem value="1小时">1小时</RadioGroupItem>
-              <RadioGroupItem value="1天">1天</RadioGroupItem>
-            </RadioGroup>
-          </div>
-
-          <Button onClick={handleAnalyze} className="mt-4 w-full">
-            开始深度分析预测
-          </Button>
+          <Button onClick={handleAnalyze}>开始分析</Button>
         </CardContent>
       </Card>
 
       {history.length > 0 && (
-        <Card className="shadow-md border border-gray-200">
-          <CardContent className="space-y-3 p-6">
-            <h3 className="text-lg font-semibold text-gray-800">
-              竞猜历史记录
-            </h3>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableCell>时间</TableCell>
-                    <TableCell>预测价</TableCell>
-                    <TableCell>周期</TableCell>
-                    <TableCell>推荐</TableCell>
-                    <TableCell>风险指数</TableCell>
-                    <TableCell>分析详情</TableCell>
-                    <TableCell>剩余时间</TableCell>
-                    <TableCell>实际价</TableCell>
-                    <TableCell>结果</TableCell>
+        <Card>
+          <CardContent>
+            <h3>交易历史</h3>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableCell>时间</TableCell>
+                  <TableCell>价格</TableCell>
+                  <TableCell>周期</TableCell>
+                  <TableCell>推荐</TableCell>
+                  <TableCell>预测价</TableCell>
+                  <TableCell>实际价</TableCell>
+                  <TableCell>结果</TableCell>
+                  <TableCell>收益</TableCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {history.map((h, idx) => (
+                  <TableRow key={idx}>
+                    <TableCell>{h.time}</TableCell>
+                    <TableCell>${h.price.toFixed(2)}</TableCell>
+                    <TableCell>{h.timeframe}</TableCell>
+                    <TableCell>{h.recommendation}</TableCell>
+                    <TableCell>${h.predictedPrice.toFixed(2)}</TableCell>
+                    <TableCell>{h.actualPrice ? `$${h.actualPrice.toFixed(2)}` : "等待"}</TableCell>
+                    <TableCell>{h.result ?? "进行中"}</TableCell>
+                    <TableCell>{h.profit !== undefined ? `${h.profit.toFixed(2)} U` : "计算中"}</TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {history.map((h, idx) => {
-                    const remaining =
-                      h.actualPrice != null
-                        ? "已结束"
-                        : `${Math.max(
-                            0,
-                            Math.floor((h.endTime - Date.now()) / 1000)
-                          )} 秒`;
-                    return (
-                      <TableRow key={idx}>
-                        <TableCell>{h.time}</TableCell>
-                        <TableCell>${h.predictedPrice}</TableCell>
-                        <TableCell>{h.timeframe}</TableCell>
-                        <TableCell>{h.recommendation}</TableCell>
-                        <TableCell>{h.riskIndex}</TableCell>
-                        <TableCell>
-                          <span title={h.analysisDetail}>
-                            {h.analysisDetail}
-                          </span>
-                        </TableCell>
-                        <TableCell>{remaining}</TableCell>
-                        <TableCell>
-                          {h.actualPrice != null
-                            ? `$${h.actualPrice}`
-                            : "等待中..."}
-                        </TableCell>
-                        <TableCell>
-                          {h.result ? (
-                            <span
-                              className={
-                                h.result === "正确"
-                                  ? "text-green-600"
-                                  : "text-red-600"
-                              }
-                            >
-                              {h.result}
-                            </span>
-                          ) : (
-                            "等待中..."
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                ))}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       )}
